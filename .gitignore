@@ -1,0 +1,6 @@
+venv/
+core
+/__pycache__/ 
+logs/
+/__init__.py
+.env
