@@ -8,19 +8,21 @@ import json
 import traceback
 import tempfile
 import os
+import uuid
 
 # === Internal Modules === #
 from utils.mysql_connector import MySQLConnector
 from utils.postgres_connector import PostgreSQLConnector
 from utils.sqlite_connector import SQLiteConnector
-from nlp.query_processor import QueryProcessor
+from nlp.context_aware_processor import ContextAwareQueryProcessor
+from nlp.session_manager import SessionManager
 from visualization.chart_generator import ChartGenerator
 from utils.error_handler import ErrorHandler
 from utils.logger import Logger
 
 # === App Configuration === #
 st.set_page_config(
-    page_title="DataViz ChatBot",
+    page_title="DataViz ChatBot - Context Aware",
     page_icon="🤖",
     layout="wide",
     initial_sidebar_state="expanded"
@@ -30,16 +32,15 @@ st.set_page_config(
 st.markdown("""
 <style>
     .chat-message {
-    padding: 1rem;
-    border-radius: 0.5rem;
-    margin: 0.5rem 0;
-    display: flex;
-    align-items: flex-start;
-    overflow-wrap: anywhere;  /* Add this */
-    word-wrap: break-word;    /* Fallback */
-    width: 100%;              /* Add width constraint */
+        padding: 1rem;
+        border-radius: 0.5rem;
+        margin: 0.5rem 0;
+        display: flex;
+        align-items: flex-start;
+        overflow-wrap: anywhere;
+        word-wrap: break-word;
+        width: 100%;
     }
-
     .user-message {
         background-color: #e3f2fd;
         border-left: 4px solid #2196f3;
@@ -48,26 +49,36 @@ st.markdown("""
         background-color: #f1f8e9;
         border-left: 4px solid #4caf50;
     }
+    .context-message {
+        background-color: #fff3e0;
+        border-left: 4px solid #ff9800;
+        font-size: 0.9em;
+    }
     .error-message {
         background-color: #ffebee;
         border-left: 4px solid #f44336;
     }
-    .upload-section {
-        background-color: #f8f9fa;
-        padding: 1rem;
-        border-radius: 0.5rem;
-        margin: 1rem 0;
+    .session-info {
+        background-color: #f5f5f5;
+        padding: 0.5rem;
+        border-radius: 0.3rem;
+        margin: 0.5rem 0;
+        font-size: 0.8em;
     }
 </style>
 """, unsafe_allow_html=True)
 
 # === Initialize Session State === #
+if 'session_id' not in st.session_state:
+    st.session_state.session_id = str(uuid.uuid4())
 if 'messages' not in st.session_state:
     st.session_state.messages = []
 if 'db_connector' not in st.session_state:
     st.session_state.db_connector = None
 if 'query_processor' not in st.session_state:
     st.session_state.query_processor = None
+if 'session_manager' not in st.session_state:
+    st.session_state.session_manager = None
 if 'db_type' not in st.session_state:
     st.session_state.db_type = None
 
@@ -97,10 +108,7 @@ if db_type == "SQLite":
         
         if uploaded_csvs and st.sidebar.button("🔄 Create Database from CSVs"):
             try:
-                # Create SQLite connector with in-memory database
                 connector = SQLiteConnector()
-                
-                # Create tables from CSV files
                 success_count = 0
                 for csv_file in uploaded_csvs:
                     table_name = os.path.splitext(csv_file.name)[0]
@@ -109,7 +117,10 @@ if db_type == "SQLite":
                 
                 if success_count > 0:
                     st.session_state.db_connector = connector
-                    st.session_state.query_processor = QueryProcessor(connector, "sqlite")
+                    st.session_state.session_manager = SessionManager(st.session_state.session_id)
+                    st.session_state.query_processor = ContextAwareQueryProcessor(
+                        connector, "sqlite", st.session_state.session_manager
+                    )
                     st.session_state.db_type = "sqlite"
                     st.sidebar.success(f"✅ Created {success_count} tables from CSV files!")
                 else:
@@ -131,7 +142,10 @@ if db_type == "SQLite":
                 connector = SQLiteConnector(uploaded_file=uploaded_db)
                 if connector.test_connection():
                     st.session_state.db_connector = connector
-                    st.session_state.query_processor = QueryProcessor(connector, "sqlite")
+                    st.session_state.session_manager = SessionManager(st.session_state.session_id)
+                    st.session_state.query_processor = ContextAwareQueryProcessor(
+                        connector, "sqlite", st.session_state.session_manager
+                    )
                     st.session_state.db_type = "sqlite"
                     st.sidebar.success("✅ Connected to uploaded database!")
                 else:
@@ -153,7 +167,10 @@ if db_type == "SQLite":
                     connector = SQLiteConnector(database_path=db_path)
                     if connector.test_connection():
                         st.session_state.db_connector = connector
-                        st.session_state.query_processor = QueryProcessor(connector, "sqlite")
+                        st.session_state.session_manager = SessionManager(st.session_state.session_id)
+                        st.session_state.query_processor = ContextAwareQueryProcessor(
+                            connector, "sqlite", st.session_state.session_manager
+                        )
                         st.session_state.db_type = "sqlite"
                         st.sidebar.success("✅ Connected to local database!")
                     else:
@@ -177,7 +194,10 @@ elif db_type == "PostgreSQL":
             connector = PostgreSQLConnector(host, port, database, username, password)
             if connector.test_connection():
                 st.session_state.db_connector = connector
-                st.session_state.query_processor = QueryProcessor(connector, "postgresql")
+                st.session_state.session_manager = SessionManager(st.session_state.session_id)
+                st.session_state.query_processor = ContextAwareQueryProcessor(
+                    connector, "postgresql", st.session_state.session_manager
+                )
                 st.session_state.db_type = "postgresql"
                 st.sidebar.success("✅ Connected successfully!")
             else:
@@ -199,7 +219,10 @@ else:  # MySQL
             connector = MySQLConnector(host, port, database, username, password)
             if connector.test_connection():
                 st.session_state.db_connector = connector
-                st.session_state.query_processor = QueryProcessor(connector, "mysql")
+                st.session_state.session_manager = SessionManager(st.session_state.session_id)
+                st.session_state.query_processor = ContextAwareQueryProcessor(
+                    connector, "mysql", st.session_state.session_manager
+                )
                 st.session_state.db_type = "mysql"
                 st.sidebar.success("✅ Connected successfully!")
             else:
@@ -208,12 +231,18 @@ else:  # MySQL
             st.sidebar.error(f"❌ Error: {str(e)}")
 
 # === Main App === #
-st.title("🤖 DataViz ChatBot")
-st.markdown("### Ask me anything about your data!")
+st.title("🤖 DataViz ChatBot - Context Aware")
+st.markdown("### Ask me anything about your data! I remember our conversation.")
 
-# Show connection status
+# Show connection status and session info
 if st.session_state.db_connector:
-    st.success(f"🔗 Connected to {st.session_state.db_type.upper()} database")
+    col1, col2 = st.columns([2, 1])
+    with col1:
+        st.success(f"🔗 Connected to {st.session_state.db_type.upper()} database")
+    with col2:
+        if st.session_state.session_manager:
+            context_count = len(st.session_state.session_manager.get_conversation_history())
+            st.info(f"💭 Context: {context_count} interactions")
 else:
     st.info("👆 Please configure and connect to a database using the sidebar")
 
@@ -229,9 +258,23 @@ with chat_container:
                 <strong>You:</strong> {message["content"]}
             </div>
             """, unsafe_allow_html=True)
+            
         elif message["role"] == "assistant":
             st.markdown('<div class="chat-message bot-message"><strong>Bot:</strong></div>', unsafe_allow_html=True)
             st.markdown(message["content"])
+            
+            # # Show context information if available
+            # if "context_used" in message and message["context_used"]:
+            #     # Format context for better display
+            #     context_display = message["context_used"]
+            #     if len(context_display) > 200:
+            #         context_display = context_display[:200] + "..."
+                
+            #     st.markdown(f"""
+            #     <div class="context-message">
+            #         <strong>Context Used:</strong> {context_display}
+            #     </div>
+            #     """, unsafe_allow_html=True)
             
             # Display SQL query if available
             if "sql_query" in message:
@@ -243,8 +286,11 @@ with chat_container:
             
             # Display chart if available
             if "chart" in message:
-                st.plotly_chart(message["chart"], use_container_width=True)
-            
+                try:
+                    st.plotly_chart(message["chart"], use_container_width=True)
+                except Exception as e:
+                    # Silently handle chart errors - don't display anything
+                    pass            
         elif message["role"] == "error":
             st.markdown(f"""
             <div class="chat-message error-message">
@@ -264,8 +310,8 @@ if user_input and st.session_state.db_connector:
     })
     
     try:
-        # Process the query
-        with st.spinner("🤔 Thinking..."):
+        # Process the query with context awareness
+        with st.spinner("🤔 Thinking with context..."):
             response = st.session_state.query_processor.process_query(user_input)
             
             if response["type"] == "data_query":
@@ -283,6 +329,7 @@ if user_input and st.session_state.db_connector:
                     "sql_query": response["sql_query"],
                     "dataframe": df,
                     "chart": chart,
+                    "context_used": response.get("context_used", ""),
                     "timestamp": datetime.now()
                 }
                 
@@ -295,6 +342,7 @@ if user_input and st.session_state.db_connector:
                 assistant_message = {
                     "role": "assistant",
                     "content": f"Here's your database schema:\n\n{schema_info}",
+                    "context_used": response.get("context_used", ""),
                     "timestamp": datetime.now()
                 }
                 
@@ -305,6 +353,7 @@ if user_input and st.session_state.db_connector:
                 assistant_message = {
                     "role": "assistant",
                     "content": response["content"],
+                    "context_used": response.get("context_used", ""),
                     "timestamp": datetime.now()
                 }
                 
@@ -313,7 +362,7 @@ if user_input and st.session_state.db_connector:
             else:
                 raise ValueError("Unknown response type")
         
-        Logger.log_info(f"Processed query: {user_input}")
+        Logger.log_info(f"Processed query with context: {user_input}")
         
     except Exception as e:
         error_message = ErrorHandler.handle_error(e)
@@ -330,40 +379,28 @@ if user_input and st.session_state.db_connector:
 elif user_input and not st.session_state.db_connector:
     st.error("Please connect to a database first!")
 
-# === Footer === #
-st.markdown("---")
-st.markdown("### 📊 Sample Queries to Try:")
-
-if st.session_state.db_type == "sqlite":
-    st.markdown("""
-    - "Show me all tables in the database"
-    - "What columns are in the [table_name] table?"
-    - "Show me the first 10 rows from [table_name]"
-    - "Create a chart showing the distribution of [column_name]"
-    - "What are the top 5 values in [column_name]?"
-    """)
-else:
-    st.markdown("""
-    - "Show me all tables in the database"
-    - "What are the top 10 products by revenue?"
-    - "Create a chart showing sales trends over time"
-    - "Find anomalies in the customer data"
-    - "Show me the schema for the users table"
-    """)
-
 # === Sidebar Info === #
 with st.sidebar:
     st.markdown("---")
-    st.markdown("### 📈 Features")
+    st.markdown("### 🧠 Context Features")
     st.markdown("""
-    - 🔍 Natural Language to SQL
-    - 📊 Automatic Chart Generation
-    - 🔗 Multiple Database Support
-    - 🤖 Intelligent Query Processing
-    - 📋 Schema Exploration
-    - 📁 CSV File Upload (SQLite)
-    - 🗄️ Database File Upload
+    - 💭 **Session Memory**: Remembers conversation
+    - 🔄 **Follow-up Questions**: Understands "it", "that", "previous"
+    - 📊 **Iterative Exploration**: Builds on previous queries
+    - 🎯 **Smart Context**: Uses relevant past interactions
     """)
+    
+    if st.session_state.session_manager:
+        st.markdown("---")
+        st.markdown("### 📈 Session Stats")
+        history = st.session_state.session_manager.get_conversation_history()
+        st.markdown(f"**Total Interactions:** {len(history)}")
+        st.markdown(f"**Session ID:** {st.session_state.session_id[:8]}...")
+        
+        if st.button("🔍 View Context"):
+            with st.expander("Conversation Context", expanded=True):
+                for i, item in enumerate(history[-5:]):  # Show last 5 interactions
+                    st.markdown(f"**{i+1}.** {item['query'][:50]}...")
     
     if st.session_state.db_connector:
         st.markdown("---")
@@ -380,4 +417,46 @@ with st.sidebar:
     # Clear chat button
     if st.button("🗑️ Clear Chat"):
         st.session_state.messages = []
+        if st.session_state.session_manager:
+            st.session_state.session_manager.clear_session()
         st.rerun()
+
+# === Footer === #
+st.markdown("---")
+st.markdown("### 💡 Try Context-Aware Queries:")
+st.markdown("""
+- "Show me sales data" → "What about last month?" → "Create a chart for that"
+- "Find top customers" → "Show their orders" → "Which products do they buy most?"
+- "Analyze revenue trends" → "Break it down by region" → "Focus on the highest performing one"
+""")
+def display_context_info(session_manager):
+    """Display context information in sidebar."""
+    if not session_manager:
+        return
+    
+    with st.sidebar:
+        st.markdown("---")
+        st.markdown("### 💭 Current Context")
+        
+        # Get last interaction summary
+        last_summary = session_manager.get_last_interaction_summary()
+        if last_summary != "No previous interactions":
+            with st.expander("Last Interaction", expanded=False):
+                st.markdown(last_summary)
+        
+        # Show context statistics
+        history_count = len(session_manager.get_conversation_history())
+        st.markdown(f"**Total Interactions:** {history_count}")
+        
+        # Show recent queries
+        if history_count > 0:
+            recent_queries = session_manager.get_conversation_history(limit=3)
+            with st.expander("Recent Queries", expanded=False):
+                for i, item in enumerate(recent_queries, 1):
+                    st.markdown(f"**{i}.** {item.query}")
+                    if item.response_type == "data_query":
+                        st.markdown(f"   ↳ *{item.response_type}*")
+
+# Add this to your main app:
+display_context_info(st.session_state.session_manager)
+

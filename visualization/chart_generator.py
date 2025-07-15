@@ -104,17 +104,17 @@ Python Code:
             raise ValueError("Generated code did not create a 'fig' variable")
         except Exception as e:
             logging.error(f"Code execution failed: {str(e)}")
-            return self._create_error_chart(f"Code execution failed: {str(e)}")
+            return None
 
     def generate_chart(self, df: pd.DataFrame, query: str = "") -> Optional[go.Figure]:
         if df.empty:
-            return self._create_empty_chart()
+            return None
         try:
             code = self.generate_chart_code(df, query)
             return self.execute_chart_code(df, code)
         except Exception as e:
             logging.error(f"Chart generation failed: {str(e)}")
-            return self._create_error_chart(str(e))
+            return None
 
     def _analyze_dataframe(self, df: pd.DataFrame) -> Dict[str, Any]:
         analysis = {
