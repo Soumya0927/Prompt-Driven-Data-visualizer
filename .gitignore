@@ -4,3 +4,6 @@ core
 logs/
 /__init__.py
 .env
+*.pyc
+.gitignore
+sessions/
